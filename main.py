@@ -2,26 +2,29 @@ import os
 import time
 import random
 import threading
-from telegram import __version__ as tg_ver
+from flask import Flask
 from telegram.constants import ParseMode
 from telegram.ext import Application, ContextTypes
 
-# === Flask para manter Render ativo ===
-from flask import Flask
+# === Flask para manter serviço vivo no Render ===
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return f"✅ BacBo Bot v{tg_ver} está online com Python 3.13!"
+    return "✅ BacBo Bot está online com Python 3.13!"
 
-# === Configuração ===
+# === Token e Chat ID ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID"))  # precisa ser int
+CHAT_ID = int(os.getenv("CHAT_ID"))
 
+if not TELEGRAM_TOKEN:
+    raise Exception("❌ TELEGRAM_TOKEN não está definido!")
+
+# === Estilo das mensagens ===
 HEADER = "💡 <b>BOT BACBO PROFISSIONAL</b> 💡"
 DIV = "\n<b>------------------------------</b>\n"
 
-# === Histórico fake ===
+# === Simula histórico de partidas ===
 def obter_historico_fake():
     return [random.choice(["PLAYER", "BANKER", "TIE"]) for _ in range(20)]
 
@@ -45,7 +48,7 @@ def analisar_padroes(historico):
     else:
         return random.choice([("PLAYER", 60), ("BANKER", 60)])
 
-# === Envia palpite (versão async para Application) ===
+# === Envia palpite ===
 async def enviar_palpite(context: ContextTypes.DEFAULT_TYPE):
     historico = obter_historico_fake()
     palpite, confianca = analisar_padroes(historico)
@@ -60,14 +63,16 @@ async def enviar_palpite(context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.HTML)
 
-# === Inicialização do bot ===
+# === Inicializa o bot com JobQueue ===
 async def start_bot():
     app_bot = Application.builder().token(TELEGRAM_TOKEN).build()
-    job_queue = app_bot.job_queue
-    job_queue.run_repeating(enviar_palpite, interval=240, first=5)
-    await app_bot.run_polling()
+    app_bot.job_queue.run_repeating(enviar_palpite, interval=240, first=5)
+    await app_bot.initialize()
+    await app_bot.start()
+    await app_bot.updater.start_polling()
+    await app_bot.updater.wait()
 
-# === Início ===
+# === Início do app e bot ===
 if __name__ == '__main__':
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))).start()
     import asyncio
