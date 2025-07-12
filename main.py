@@ -1,73 +1,74 @@
 import os
 import time
 import random
-from telegram import Bot
-from flask import Flask
+import threading
+from telegram import __version__ as tg_ver
+from telegram.constants import ParseMode
+from telegram.ext import Application, ContextTypes
 
-# === Simula porta aberta para funcionar no plano gratuito do Render ===
+# === Flask para manter Render ativo ===
+from flask import Flask
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-return "✅ BacBo Bot está online!"
+    return f"✅ BacBo Bot v{tg_ver} está online com Python 3.13!"
 
-# === Configuração do Bot ===
+# === Configuração ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-bot = Bot(token=TELEGRAM_TOKEN)
+CHAT_ID = int(os.getenv("CHAT_ID"))  # precisa ser int
 
-# === Estilo da Mensagem ===
 HEADER = "💡 <b>BOT BACBO PROFISSIONAL</b> 💡"
 DIV = "\n<b>------------------------------</b>\n"
 
-# === Histórico Simulado (pode substituir por scraping no futuro) ===
+# === Histórico fake ===
 def obter_historico_fake():
-opcoes = ["PLAYER", "BANKER", "TIE"]
-return [random.choice(opcoes) for _ in range(20)]
+    return [random.choice(["PLAYER", "BANKER", "TIE"]) for _ in range(20)]
 
-# === Lógica de Palpite Simples ===
+# === Lógica do palpite ===
 def analisar_padroes(historico):
-player = historico.count("PLAYER")
-banker = historico.count("BANKER")
-tie = historico.count("TIE")
-total = len(historico)
+    player = historico.count("PLAYER")
+    banker = historico.count("BANKER")
+    tie = historico.count("TIE")
+    total = len(historico)
 
-pct_player = player / total * 100
-pct_banker = banker / total * 100
-pct_tie = tie / total * 100
+    pct_player = player / total * 100
+    pct_banker = banker / total * 100
+    pct_tie = tie / total * 100
 
-if pct_player > 55:
-return "PLAYER", round(pct_player)
-elif pct_banker > 55:
-return "BANKER", round(pct_banker)
-elif pct_tie > 15:
-return "TIE", round(pct_tie)
-else:
-return random.choice([("PLAYER", 60), ("BANKER", 60)])
+    if pct_player > 55:
+        return "PLAYER", round(pct_player)
+    elif pct_banker > 55:
+        return "BANKER", round(pct_banker)
+    elif pct_tie > 15:
+        return "TIE", round(pct_tie)
+    else:
+        return random.choice([("PLAYER", 60), ("BANKER", 60)])
 
-# === Envia a mensagem no Telegram ===
-def enviar_palpite():
-historico = obter_historico_fake()
-palpite, confianca = analisar_padroes(historico)
+# === Envia palpite (versão async para Application) ===
+async def enviar_palpite(context: ContextTypes.DEFAULT_TYPE):
+    historico = obter_historico_fake()
+    palpite, confianca = analisar_padroes(historico)
 
-mensagem = (
-f"{HEADER}{DIV}"
-f"📊 <b>Histórico:</b> {' | '.join(historico[-10:])}\n"
-f"🎯 <b>Palpite:</b> <u>{palpite}</u>\n"
-f"📈 <b>Confiança:</b> {confianca}%\n"
-f"🕒 <i>{time.strftime('%H:%M:%S')}</i>"
-)
+    mensagem = (
+        f"{HEADER}{DIV}"
+        f"📊 <b>Histórico:</b> {' | '.join(historico[-10:])}\n"
+        f"🎯 <b>Palpite:</b> <u>{palpite}</u>\n"
+        f"📈 <b>Confiança:</b> {confianca}%\n"
+        f"🕒 <i>{time.strftime('%H:%M:%S')}</i>"
+    )
 
-bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode="HTML")
+    await context.bot.send_message(chat_id=CHAT_ID, text=mensagem, parse_mode=ParseMode.HTML)
 
-# === Loop que roda continuamente com intervalo entre os palpites ===
-def iniciar_bot():
-while True:
-enviar_palpite()
-time.sleep(240) # Espera 4 minutos (240 segundos)
+# === Inicialização do bot ===
+async def start_bot():
+    app_bot = Application.builder().token(TELEGRAM_TOKEN).build()
+    job_queue = app_bot.job_queue
+    job_queue.run_repeating(enviar_palpite, interval=240, first=5)
+    await app_bot.run_polling()
 
-# Inicia o bot + servidor Flask
+# === Início ===
 if __name__ == '__main__':
-import threading
-threading.Thread(target=iniciar_bot).start()
-app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))).start()
+    import asyncio
+    asyncio.run(start_bot())
